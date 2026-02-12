@@ -6,15 +6,15 @@ from .db import Base, engine, get_db
 from .models import Person, Relationship, TreeViewState
 from .schemas import (
     ExportData,
-    Person as PersonSchema,
     PersonCreate,
+    Person as PersonSchema,
     PersonUpdate,
     Relationship as RelationshipSchema,
     RelationshipCreate,
     TreeViewStatePayload,
 )
 
-app = FastAPI(title="Tree API", version="0.2.0")
+app = FastAPI(title="Tree API", version="0.1.0")
 Base.metadata.create_all(bind=engine)
 
 
@@ -37,14 +37,6 @@ def list_people(db: Session = Depends(get_db)):
     return db.query(Person).order_by(Person.id.asc()).all()
 
 
-@app.get("/people/{person_id}", response_model=PersonSchema)
-def get_person(person_id: int, db: Session = Depends(get_db)):
-    person = db.get(Person, person_id)
-    if not person:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
-    return person
-
-
 @app.patch("/people/{person_id}", response_model=PersonSchema)
 def update_person(person_id: int, payload: PersonUpdate, db: Session = Depends(get_db)):
     person = db.get(Person, person_id)
@@ -59,25 +51,15 @@ def update_person(person_id: int, payload: PersonUpdate, db: Session = Depends(g
     return person
 
 
-@app.delete("/people/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_person(person_id: int, db: Session = Depends(get_db)):
-    person = db.get(Person, person_id)
-    if not person:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
-
-    db.delete(person)
-    db.commit()
-
-
 @app.post("/relationships", response_model=RelationshipSchema, status_code=status.HTTP_201_CREATED)
 def create_relationship(payload: RelationshipCreate, db: Session = Depends(get_db)):
     if payload.from_person_id == payload.to_person_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Self relationships are not allowed")
+        raise HTTPException(status_code=400, detail="Self relationships are not allowed")
 
     from_person = db.get(Person, payload.from_person_id)
     to_person = db.get(Person, payload.to_person_id)
     if not from_person or not to_person:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Referenced person not found")
+        raise HTTPException(status_code=404, detail="Referenced person not found")
 
     relationship = Relationship(**payload.model_dump())
     db.add(relationship)
@@ -86,7 +68,7 @@ def create_relationship(payload: RelationshipCreate, db: Session = Depends(get_d
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Relationship already exists")
+        raise HTTPException(status_code=409, detail="Relationship already exists")
 
     db.refresh(relationship)
     return relationship
@@ -101,7 +83,7 @@ def list_relationships(db: Session = Depends(get_db)):
 def delete_relationship(relationship_id: int, db: Session = Depends(get_db)):
     relationship = db.get(Relationship, relationship_id)
     if not relationship:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship not found")
+        raise HTTPException(status_code=404, detail="Relationship not found")
 
     db.delete(relationship)
     db.commit()
@@ -146,35 +128,25 @@ def export_data(db: Session = Depends(get_db)):
 
 @app.post("/import", response_model=ExportData)
 def import_data(payload: ExportData, db: Session = Depends(get_db)):
-    person_ids = {person.id for person in payload.people}
+    db.query(Relationship).delete()
+    db.query(Person).delete()
+    db.query(TreeViewState).delete()
+    db.commit()
+
+    for person in payload.people:
+        db.add(Person(**person.model_dump()))
+    db.commit()
+
     for relationship in payload.relationships:
-        if relationship.from_person_id not in person_ids or relationship.to_person_id not in person_ids:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Import payload contains relationships referencing unknown person IDs",
-            )
+        db.add(Relationship(**relationship.model_dump()))
 
-    try:
-        db.query(Relationship).delete()
-        db.query(Person).delete()
-        db.query(TreeViewState).delete()
-
-        for person in payload.people:
-            db.add(Person(**person.model_dump()))
-
-        for relationship in payload.relationships:
-            db.add(Relationship(**relationship.model_dump()))
-
-        db.add(
-            TreeViewState(
-                id=1,
-                collapsed_node_ids=payload.tree_view_state.collapsed_node_ids,
-                viewport=payload.tree_view_state.viewport,
-            )
+    db.add(
+        TreeViewState(
+            id=1,
+            collapsed_node_ids=payload.tree_view_state.collapsed_node_ids,
+            viewport=payload.tree_view_state.viewport,
         )
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Import violates data constraints")
+    )
+    db.commit()
 
     return payload
