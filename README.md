@@ -2,7 +2,7 @@
 Family Tree application
 
 ## Current project status
-This repository now includes a working backend API scaffold for a family tree application using **FastAPI + SQLite**.
+This repository includes a working backend API scaffold for a family tree application using **FastAPI + SQLite**.
 
 ## Quick start
 ```bash
@@ -20,6 +20,9 @@ API docs are available at:
 - `GET /health`
 - `POST /people`
 - `GET /people`
+- `GET /people/{person_id}`
+- `PATCH /people/{person_id}`
+- `DELETE /people/{person_id}`
 - `PATCH /people/{person_id}`
 - `POST /relationships`
 - `GET /relationships`
